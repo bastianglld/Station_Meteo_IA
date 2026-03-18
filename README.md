@@ -10,7 +10,7 @@ Ce projet utilise un réseau de neurones convolutionnel (1D-CNN) pour prédire l
 ## 📊 Benchmark des modèles
 Nous avons comparé 4 architectures (MLP, RNN, CNN, Random Forest). Le 1D-CNN a été choisi pour son excellent rapport performance/efficience sur STM32.
 
-![Matrices de confusion](model_training/comparaison.png)
+![Matrices de confusion](comparaison.png)
 
 ## 🚀 Structure du dépôt
 * `/Model_Training` : Notebook Colab et modèle TFLite quantifié.
