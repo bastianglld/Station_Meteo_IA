@@ -3,103 +3,245 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tableau de Bord Météo STM32</title>
+    <title>Dashboard Météo STM32</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
     <style>
-        /* Un peu de CSS pour rendre le site joli */
+        /* --- STYLE MÉTÉO (FOND ET POLICES) --- */
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #eef2f5;
-            color: #333;
+            font-family: '-apple-system', BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            /* Joli dégradé de fond type "Ciel clair" */
+            background: linear-gradient(135deg, #a1c4fd 0%, #c2e9fb 100%);
+            color: #2c3e50;
+            margin: 0;
+            padding: 30px 20px;
             text-align: center;
-            padding: 50px;
+            min-height: 100vh;
         }
-        h1 { color: #2c3e50; }
         
-        .dashboard {
+        h1 { margin-bottom: 5px; font-weight: 600; color: #1a252f; }
+        .subtitle { color: #34495e; margin-bottom: 40px; font-weight: 500; }
+        
+        /* --- STYLE DES CARTES (GLASSMORPHISM) --- */
+        .cards-container {
             display: flex;
             justify-content: center;
-            gap: 30px;
-            margin-top: 40px;
+            gap: 25px;
+            margin-bottom: 40px;
             flex-wrap: wrap;
         }
-        
         .card {
-            background: white;
-            padding: 30px;
-            border-radius: 15px;
-            box-shadow: 0 10px 20px rgba(0,0,0,0.05);
+            /* Effet verre semi-transparent */
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            padding: 25px;
+            border-radius: 20px;
+            box-shadow: 0 8px 32px rgba(31, 38, 135, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.5);
             width: 200px;
-            transition: transform 0.3s;
+            transition: transform 0.3s ease;
         }
-        
         .card:hover { transform: translateY(-5px); }
-        .card h3 { margin-top: 0; color: #7f8c8d; font-weight: 500; }
-        .value { font-size: 2.5em; font-weight: bold; color: #3498db; margin: 10px 0; }
-        .date-maj { margin-top: 30px; font-size: 0.9em; color: #95a5a6; }
+        
+        .card h3 { margin: 0; font-size: 1.1em; color: #546e7a; text-transform: uppercase; letter-spacing: 1px; }
+        .value { font-size: 2.8em; font-weight: 700; margin: 15px 0 5px 0; }
+        
+        /* Couleurs spécifiques pour chaque valeur */
+        .card.temp .value { color: #ff7675; }
+        .card.hum .value { color: #0984e3; }
+        .card.press .value { color: #6c5ce7; }
+
+        /* --- STYLE DES GRAPHIQUES --- */
+        .charts-container {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 25px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        .chart-box {
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(10px);
+            padding: 20px;
+            border-radius: 20px;
+            box-shadow: 0 8px 32px rgba(31, 38, 135, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            width: calc(33.33% - 50px);
+            min-width: 320px;
+            height: 300px; /* Hauteur fixe pour un bel affichage */
+            position: relative;
+        }
+
+        .chart-title {
+            text-align: left;
+            margin: 0 0 15px 10px;
+            color: #2d3436;
+            font-weight: 600;
+        }
+
+        .date-maj { margin-top: 40px; font-size: 0.9em; color: #34495e; font-weight: 500; }
     </style>
 </head>
 <body>
 
-    <h1>Ma Station Météo Connectée</h1>
-    <p>Données en temps réel depuis la carte STM32</p>
+    <h1>Station Météo IA Embarquée</h1>
+    <div class="subtitle">En direct depuis la carte STM32</div>
 
-    <div class="dashboard">
-        <div class="card">
+    <div class="cards-container">
+        <div class="card temp">
             <h3>Température</h3>
             <div class="value" id="val_temp">--</div>
-            <div>°C</div>
+            <div style="color: #ff7675; font-weight: bold;">°C</div>
         </div>
-        <div class="card">
+        <div class="card hum">
             <h3>Humidité</h3>
             <div class="value" id="val_hum">--</div>
-            <div>%</div>
+            <div style="color: #0984e3; font-weight: bold;">%</div>
         </div>
-        <div class="card">
+        <div class="card press">
             <h3>Pression</h3>
             <div class="value" id="val_press">--</div>
-            <div>hPa</div>
+            <div style="color: #6c5ce7; font-weight: bold;">hPa</div>
         </div>
     </div>
 
-    <div class="date-maj" id="derniere_maj">Dernière mise à jour : En attente...</div>
+    <div class="charts-container">
+        <div class="chart-box">
+            <div class="chart-title">Évolution Température</div>
+            <canvas id="chartTemp"></canvas>
+        </div>
+        <div class="chart-box">
+            <div class="chart-title">Évolution Humidité</div>
+            <canvas id="chartHum"></canvas>
+        </div>
+        <div class="chart-box">
+            <div class="chart-title">Évolution Pression</div>
+            <canvas id="chartPress"></canvas>
+        </div>
+    </div>
+
+    <div class="date-maj" id="derniere_maj">Synchronisation en cours avec ThingSpeak...</div>
 
     <script>
-        // --- TES IDENTIFIANTS THINGSPEAK ---
+        // --- IDENTIFIANTS THINGSPEAK ---
         const channelID = '3339275';
         const readAPIKey = 'QK8RTANXM2N0KLRD';
+        const url = `https://api.thingspeak.com/channels/${channelID}/feeds.json?api_key=${readAPIKey}&results=30`;
 
-        // L'URL magique qui demande la toute dernière valeur (results=1) à ThingSpeak
-        const url = `https://api.thingspeak.com/channels/${channelID}/feeds.json?api_key=${readAPIKey}&results=1`;
+        let chartTemp, chartHum, chartPress;
 
-        // Fonction pour récupérer et afficher les données
+        function formatHeure(dateString) {
+            const date = new Date(dateString);
+            return date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }); // Affiche juste Heure:Minute
+        }
+
+        // Fonction avancée pour créer un graphique "Style Météo"
+        function creerGraphiqueMeteo(canvasId, colorStart, colorEnd, borderColor, unit) {
+            const ctx = document.getElementById(canvasId).getContext('2d');
+            
+            // Création du dégradé de remplissage sous la courbe
+            let gradient = ctx.createLinearGradient(0, 0, 0, 300);
+            gradient.addColorStop(0, colorStart); // Couleur forte en haut
+            gradient.addColorStop(1, colorEnd);   // Transparent en bas
+
+            return new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        data: [],
+                        backgroundColor: gradient,
+                        borderColor: borderColor,
+                        borderWidth: 3,
+                        tension: 0.5, // 0.5 = Courbe très douce et arrondie (Style météo)
+                        pointRadius: 0, // Cache les points par défaut
+                        pointHitRadius: 20, // Zone large pour détecter la souris
+                        pointHoverRadius: 6, // Le point apparaît quand on passe la souris
+                        pointHoverBackgroundColor: borderColor,
+                        pointHoverBorderColor: '#fff',
+                        pointHoverBorderWidth: 2,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }, // Cache la légende inutile
+                        tooltip: {
+                            backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                            titleColor: '#2d3436',
+                            bodyColor: '#2d3436',
+                            borderColor: 'rgba(0,0,0,0.1)',
+                            borderWidth: 1,
+                            padding: 10,
+                            displayColors: false,
+                            callbacks: {
+                                label: function(context) { return context.parsed.y + ' ' + unit; }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: { 
+                            grid: { display: false }, // Enlève la grille verticale
+                            ticks: { maxTicksLimit: 6, color: '#636e72' } 
+                        },
+                        y: { 
+                            grid: { color: 'rgba(0,0,0,0.05)', borderDash: [5, 5] }, // Grille horizontale pointillée
+                            ticks: { color: '#636e72' }
+                        }
+                    },
+                    animation: false
+                }
+            });
+        }
+
+        // Initialisation des graphiques avec leurs dégradés
+        window.onload = function() {
+            // Température : Dégradé Rouge/Orange
+            chartTemp = creerGraphiqueMeteo('chartTemp', 'rgba(255, 118, 117, 0.6)', 'rgba(255, 118, 117, 0.0)', '#ff7675', '°C');
+            // Humidité : Dégradé Bleu
+            chartHum = creerGraphiqueMeteo('chartHum', 'rgba(9, 132, 227, 0.6)', 'rgba(9, 132, 227, 0.0)', '#0984e3', '%');
+            // Pression : Dégradé Violet
+            chartPress = creerGraphiqueMeteo('chartPress', 'rgba(108, 92, 231, 0.6)', 'rgba(108, 92, 231, 0.0)', '#6c5ce7', 'hPa');
+            
+            recupererDonnees();
+        };
+
+        // Fonction de mise à jour des données
         function recupererDonnees() {
             fetch(url)
-                .then(response => response.json()) // On convertit la réponse en format JSON
+                .then(response => response.json())
                 .then(data => {
-                    // On vérifie qu'il y a bien des données
                     if (data.feeds && data.feeds.length > 0) {
-                        const derniereMesure = data.feeds[0]; // On prend la dernière mesure
-
-                        // On met à jour le texte sur la page HTML
-                        // field1 = temp, field2 = hum, field3 = press
+                        
+                        const derniereMesure = data.feeds[data.feeds.length - 1];
                         document.getElementById('val_temp').innerText = derniereMesure.field1 ? parseFloat(derniereMesure.field1).toFixed(1) : '--';
                         document.getElementById('val_hum').innerText = derniereMesure.field2 ? parseFloat(derniereMesure.field2).toFixed(1) : '--';
                         document.getElementById('val_press').innerText = derniereMesure.field3 ? parseFloat(derniereMesure.field3).toFixed(1) : '--';
+                        
+                        document.getElementById('derniere_maj').innerText = 'Dernière mise à jour : ' + formatHeure(derniereMesure.created_at) + ' (Synchronisation auto: 15s)';
 
-                        // On met à jour l'heure d'actualisation
-                        const dateMesure = new Date(derniereMesure.created_at);
-                        document.getElementById('derniere_maj').innerText = 'Dernière mise à jour : ' + dateMesure.toLocaleTimeString('fr-FR');
+                        let labels = [], dataTemp = [], dataHum = [], dataPress = [];
+
+                        data.feeds.forEach(feed => {
+                            labels.push(formatHeure(feed.created_at));
+                            dataTemp.push(feed.field1);
+                            dataHum.push(feed.field2);
+                            dataPress.push(feed.field3);
+                        });
+
+                        chartTemp.data.labels = labels; chartTemp.data.datasets[0].data = dataTemp; chartTemp.update();
+                        chartHum.data.labels = labels; chartHum.data.datasets[0].data = dataHum; chartHum.update();
+                        chartPress.data.labels = labels; chartPress.data.datasets[0].data = dataPress; chartPress.update();
                     }
                 })
-                .catch(error => console.error('Erreur de connexion à ThingSpeak :', error));
+                .catch(error => console.error('Erreur :', error));
         }
 
-        // 1. On lance la fonction une première fois tout de suite
-        recupererDonnees();
-
-        // 2. On demande au navigateur de relancer la fonction toutes les 15 secondes (15000 millisecondes)
         setInterval(recupererDonnees, 15000);
     </script>
-
 </body>
 </html>
