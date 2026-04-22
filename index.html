@@ -7,10 +7,9 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     
     <style>
-        /* --- STYLE MÉTÉO (FOND ET POLICES) --- */
+        /* --- STYLE GÉNÉRAL (MÉTÉO) --- */
         body {
             font-family: '-apple-system', BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-            /* Joli dégradé de fond type "Ciel clair" */
             background: linear-gradient(135deg, #a1c4fd 0%, #c2e9fb 100%);
             color: #2c3e50;
             margin: 0;
@@ -20,8 +19,29 @@
         }
         
         h1 { margin-bottom: 5px; font-weight: 600; color: #1a252f; }
-        .subtitle { color: #34495e; margin-bottom: 40px; font-weight: 500; }
+        .subtitle { color: #34495e; margin-bottom: 30px; font-weight: 500; }
         
+        /* --- STYLE DE L'ALERTE --- */
+        .alert-banner {
+            background-color: #ff4757;
+            color: white;
+            padding: 15px;
+            margin: 0 auto 30px auto;
+            max-width: 800px;
+            border-radius: 12px;
+            font-weight: bold;
+            font-size: 1.2em;
+            box-shadow: 0 4px 15px rgba(255, 71, 87, 0.4);
+            display: none; /* Caché par défaut */
+            animation: clignotement 1.5s infinite;
+        }
+
+        @keyframes clignotement {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.02); opacity: 0.9; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+
         /* --- STYLE DES CARTES (GLASSMORPHISM) --- */
         .cards-container {
             display: flex;
@@ -31,7 +51,6 @@
             flex-wrap: wrap;
         }
         .card {
-            /* Effet verre semi-transparent */
             background: rgba(255, 255, 255, 0.7);
             backdrop-filter: blur(10px);
             -webkit-backdrop-filter: blur(10px);
@@ -40,14 +59,18 @@
             box-shadow: 0 8px 32px rgba(31, 38, 135, 0.1);
             border: 1px solid rgba(255, 255, 255, 0.5);
             width: 200px;
-            transition: transform 0.3s ease;
+            transition: transform 0.3s ease, border 0.3s ease, background 0.3s ease;
         }
         .card:hover { transform: translateY(-5px); }
         
+        .card.alerte-active {
+            border: 2px solid #ff4757;
+            background: rgba(255, 71, 87, 0.1);
+        }
+
         .card h3 { margin: 0; font-size: 1.1em; color: #546e7a; text-transform: uppercase; letter-spacing: 1px; }
         .value { font-size: 2.8em; font-weight: 700; margin: 15px 0 5px 0; }
         
-        /* Couleurs spécifiques pour chaque valeur */
         .card.temp .value { color: #ff7675; }
         .card.hum .value { color: #0984e3; }
         .card.press .value { color: #6c5ce7; }
@@ -70,17 +93,9 @@
             border: 1px solid rgba(255, 255, 255, 0.5);
             width: calc(33.33% - 50px);
             min-width: 320px;
-            height: 300px; /* Hauteur fixe pour un bel affichage */
-            position: relative;
+            height: 300px;
         }
-
-        .chart-title {
-            text-align: left;
-            margin: 0 0 15px 10px;
-            color: #2d3436;
-            font-weight: 600;
-        }
-
+        .chart-title { text-align: left; margin: 0 0 15px 10px; color: #2d3436; font-weight: 600; }
         .date-maj { margin-top: 40px; font-size: 0.9em; color: #34495e; font-weight: 500; }
     </style>
 </head>
@@ -89,8 +104,12 @@
     <h1>Station Météo IA Embarquée</h1>
     <div class="subtitle">En direct depuis la carte STM32</div>
 
+    <div id="bandeau_alerte" class="alert-banner">
+        ⚠️ ALERTE : Surchauffe détectée ! La température a dépassé le seuil.
+    </div>
+
     <div class="cards-container">
-        <div class="card temp">
+        <div class="card temp" id="carte_temp">
             <h3>Température</h3>
             <div class="value" id="val_temp">--</div>
             <div style="color: #ff7675; font-weight: bold;">°C</div>
@@ -122,115 +141,104 @@
         </div>
     </div>
 
+    <div class="subtitle" style="margin-top: 40px; margin-bottom: 15px;">Moyennes (Calcul MATLAB)</div>
+    <div class="cards-container" style="gap: 15px; margin-bottom: 10px;">
+        <div class="card" style="width: 150px; padding: 15px; background: rgba(255,255,255,0.4);">
+            <h3 style="font-size: 0.9em;">Temp. Moy.</h3>
+            <div class="value" id="moy_temp" style="font-size: 1.8em; color: #ff7675;">--</div>
+        </div>
+        <div class="card" style="width: 150px; padding: 15px; background: rgba(255,255,255,0.4);">
+            <h3 style="font-size: 0.9em;">Hum. Moy.</h3>
+            <div class="value" id="moy_hum" style="font-size: 1.8em; color: #0984e3;">--</div>
+        </div>
+        <div class="card" style="width: 150px; padding: 15px; background: rgba(255,255,255,0.4);">
+            <h3 style="font-size: 0.9em;">Press. Moy.</h3>
+            <div class="value" id="moy_press" style="font-size: 1.8em; color: #6c5ce7;">--</div>
+        </div>
+    </div>
+
     <div class="date-maj" id="derniere_maj">Synchronisation en cours avec ThingSpeak...</div>
 
     <script>
-        // --- IDENTIFIANTS THINGSPEAK ---
+        // ==========================================
+        // 1. CONFIGURATION DES IDENTIFIANTS
+        // ==========================================
+        
+        // Canal Principal (En direct de la STM32)
         const channelID = '3339275';
         const readAPIKey = 'QK8RTANXM2N0KLRD';
-        const url = `https://api.thingspeak.com/channels/${channelID}/feeds.json?api_key=${readAPIKey}&results=30`;
+        const urlDirect = `https://api.thingspeak.com/channels/${channelID}/feeds.json?api_key=${readAPIKey}&results=30`;
 
+        // Canal Secondaire (Moyennes de MATLAB) - !! À REMPLACER PAR TES VRAIES INFOS !!
+        const statsChannelID = '3353776'; 
+        const readStatsAPIKey = '1SY8XRXT9OXWYUS3'; 
+        const urlStats = `https://api.thingspeak.com/channels/${statsChannelID}/feeds.json?api_key=${readStatsAPIKey}&results=1`;
+
+        // Seuil pour déclencher l'alerte
+        const SEUIL_ALERTE = 30.0; 
+
+        // ==========================================
+        // 2. FONCTIONS GRAPHIQUES
+        // ==========================================
         let chartTemp, chartHum, chartPress;
 
         function formatHeure(dateString) {
-            const date = new Date(dateString);
-            return date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }); // Affiche juste Heure:Minute
+            return new Date(dateString).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
         }
 
-        // Fonction avancée pour créer un graphique "Style Météo"
         function creerGraphiqueMeteo(canvasId, colorStart, colorEnd, borderColor, unit) {
             const ctx = document.getElementById(canvasId).getContext('2d');
-            
-            // Création du dégradé de remplissage sous la courbe
             let gradient = ctx.createLinearGradient(0, 0, 0, 300);
-            gradient.addColorStop(0, colorStart); // Couleur forte en haut
-            gradient.addColorStop(1, colorEnd);   // Transparent en bas
+            gradient.addColorStop(0, colorStart);
+            gradient.addColorStop(1, colorEnd);
 
             return new Chart(ctx, {
                 type: 'line',
-                data: {
-                    labels: [],
-                    datasets: [{
-                        data: [],
-                        backgroundColor: gradient,
-                        borderColor: borderColor,
-                        borderWidth: 3,
-                        tension: 0.5, // 0.5 = Courbe très douce et arrondie (Style météo)
-                        pointRadius: 0, // Cache les points par défaut
-                        pointHitRadius: 20, // Zone large pour détecter la souris
-                        pointHoverRadius: 6, // Le point apparaît quand on passe la souris
-                        pointHoverBackgroundColor: borderColor,
-                        pointHoverBorderColor: '#fff',
-                        pointHoverBorderWidth: 2,
-                        fill: true
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { display: false }, // Cache la légende inutile
-                        tooltip: {
-                            backgroundColor: 'rgba(255, 255, 255, 0.9)',
-                            titleColor: '#2d3436',
-                            bodyColor: '#2d3436',
-                            borderColor: 'rgba(0,0,0,0.1)',
-                            borderWidth: 1,
-                            padding: 10,
-                            displayColors: false,
-                            callbacks: {
-                                label: function(context) { return context.parsed.y + ' ' + unit; }
-                            }
-                        }
-                    },
-                    scales: {
-                        x: { 
-                            grid: { display: false }, // Enlève la grille verticale
-                            ticks: { maxTicksLimit: 6, color: '#636e72' } 
-                        },
-                        y: { 
-                            grid: { color: 'rgba(0,0,0,0.05)', borderDash: [5, 5] }, // Grille horizontale pointillée
-                            ticks: { color: '#636e72' }
-                        }
-                    },
-                    animation: false
-                }
+                data: { labels: [], datasets: [{ data: [], backgroundColor: gradient, borderColor: borderColor, borderWidth: 3, tension: 0.5, pointRadius: 0, pointHitRadius: 20, pointHoverRadius: 6, pointHoverBackgroundColor: borderColor, pointHoverBorderColor: '#fff', pointHoverBorderWidth: 2, fill: true }] },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { backgroundColor: 'rgba(255, 255, 255, 0.9)', titleColor: '#2d3436', bodyColor: '#2d3436', borderColor: 'rgba(0,0,0,0.1)', borderWidth: 1, padding: 10, displayColors: false, callbacks: { label: function(context) { return context.parsed.y + ' ' + unit; } } } }, scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 6, color: '#636e72' } }, y: { grid: { color: 'rgba(0,0,0,0.05)', borderDash: [5, 5] }, ticks: { color: '#636e72' } } }, animation: false }
             });
         }
 
-        // Initialisation des graphiques avec leurs dégradés
         window.onload = function() {
-            // Température : Dégradé Rouge/Orange
             chartTemp = creerGraphiqueMeteo('chartTemp', 'rgba(255, 118, 117, 0.6)', 'rgba(255, 118, 117, 0.0)', '#ff7675', '°C');
-            // Humidité : Dégradé Bleu
             chartHum = creerGraphiqueMeteo('chartHum', 'rgba(9, 132, 227, 0.6)', 'rgba(9, 132, 227, 0.0)', '#0984e3', '%');
-            // Pression : Dégradé Violet
             chartPress = creerGraphiqueMeteo('chartPress', 'rgba(108, 92, 231, 0.6)', 'rgba(108, 92, 231, 0.0)', '#6c5ce7', 'hPa');
             
             recupererDonnees();
+            recupererMoyennes();
         };
 
-        // Fonction de mise à jour des données
+        // ==========================================
+        // 3. RECUPERATION DES DONNEES (STM32)
+        // ==========================================
         function recupererDonnees() {
-            fetch(url)
+            fetch(urlDirect)
                 .then(response => response.json())
                 .then(data => {
                     if (data.feeds && data.feeds.length > 0) {
-                        
                         const derniereMesure = data.feeds[data.feeds.length - 1];
-                        document.getElementById('val_temp').innerText = derniereMesure.field1 ? parseFloat(derniereMesure.field1).toFixed(1) : '--';
+                        const tempActuelle = parseFloat(derniereMesure.field1);
+
+                        // Affichage des valeurs brutes
+                        document.getElementById('val_temp').innerText = derniereMesure.field1 ? tempActuelle.toFixed(1) : '--';
                         document.getElementById('val_hum').innerText = derniereMesure.field2 ? parseFloat(derniereMesure.field2).toFixed(1) : '--';
                         document.getElementById('val_press').innerText = derniereMesure.field3 ? parseFloat(derniereMesure.field3).toFixed(1) : '--';
-                        
-                        document.getElementById('derniere_maj').innerText = 'Dernière mise à jour : ' + formatHeure(derniereMesure.created_at) + ' (Synchronisation auto: 15s)';
+                        document.getElementById('derniere_maj').innerText = 'Dernière mise à jour : ' + formatHeure(derniereMesure.created_at) + ' (Actualisation auto: 15s)';
 
+                        // Gestion de l'alerte
+                        if (tempActuelle >= SEUIL_ALERTE) {
+                            document.getElementById('bandeau_alerte').style.display = 'block';
+                            document.getElementById('carte_temp').classList.add('alerte-active');
+                        } else {
+                            document.getElementById('bandeau_alerte').style.display = 'none';
+                            document.getElementById('carte_temp').classList.remove('alerte-active');
+                        }
+
+                        // Mise à jour des graphiques
                         let labels = [], dataTemp = [], dataHum = [], dataPress = [];
-
                         data.feeds.forEach(feed => {
                             labels.push(formatHeure(feed.created_at));
-                            dataTemp.push(feed.field1);
-                            dataHum.push(feed.field2);
-                            dataPress.push(feed.field3);
+                            dataTemp.push(feed.field1); dataHum.push(feed.field2); dataPress.push(feed.field3);
                         });
 
                         chartTemp.data.labels = labels; chartTemp.data.datasets[0].data = dataTemp; chartTemp.update();
@@ -241,7 +249,29 @@
                 .catch(error => console.error('Erreur :', error));
         }
 
-        setInterval(recupererDonnees, 15000);
+        // ==========================================
+        // 4. RECUPERATION DES STATS (MATLAB)
+        // ==========================================
+        function recupererMoyennes() {
+            fetch(urlStats)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.feeds && data.feeds.length > 0) {
+                        const derniereMoyenne = data.feeds[0];
+                        document.getElementById('moy_temp').innerText = derniereMoyenne.field1 ? parseFloat(derniereMoyenne.field1).toFixed(1) + ' °C' : '--';
+                        document.getElementById('moy_hum').innerText = derniereMoyenne.field2 ? parseFloat(derniereMoyenne.field2).toFixed(1) + ' %' : '--';
+                        document.getElementById('moy_press').innerText = derniereMoyenne.field3 ? parseFloat(derniereMoyenne.field3).toFixed(1) + ' hPa' : '--';
+                    }
+                })
+                .catch(error => console.error('Erreur Stats MATLAB :', error));
+        }
+
+        // ==========================================
+        // 5. TIMERS (Rafraîchissement automatique)
+        // ==========================================
+        setInterval(recupererDonnees, 15000); // Météo en direct toutes les 15 secondes
+        setInterval(recupererMoyennes, 60000); // Stats MATLAB toutes les minutes
+
     </script>
 </body>
 </html>
