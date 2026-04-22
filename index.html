@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tableau de Bord Météo STM32</title>
+    <style>
+        /* Un peu de CSS pour rendre le site joli */
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #eef2f5;
+            color: #333;
+            text-align: center;
+            padding: 50px;
+        }
+        h1 { color: #2c3e50; }
+        
+        .dashboard {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            margin-top: 40px;
+            flex-wrap: wrap;
+        }
+        
+        .card {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.05);
+            width: 200px;
+            transition: transform 0.3s;
+        }
+        
+        .card:hover { transform: translateY(-5px); }
+        .card h3 { margin-top: 0; color: #7f8c8d; font-weight: 500; }
+        .value { font-size: 2.5em; font-weight: bold; color: #3498db; margin: 10px 0; }
+        .date-maj { margin-top: 30px; font-size: 0.9em; color: #95a5a6; }
+    </style>
+</head>
+<body>
+
+    <h1>Ma Station Météo Connectée</h1>
+    <p>Données en temps réel depuis la carte STM32</p>
+
+    <div class="dashboard">
+        <div class="card">
+            <h3>Température</h3>
+            <div class="value" id="val_temp">--</div>
+            <div>°C</div>
+        </div>
+        <div class="card">
+            <h3>Humidité</h3>
+            <div class="value" id="val_hum">--</div>
+            <div>%</div>
+        </div>
+        <div class="card">
+            <h3>Pression</h3>
+            <div class="value" id="val_press">--</div>
+            <div>hPa</div>
+        </div>
+    </div>
+
+    <div class="date-maj" id="derniere_maj">Dernière mise à jour : En attente...</div>
+
+    <script>
+        // --- TES IDENTIFIANTS THINGSPEAK ---
+        const channelID = '3339275';
+        const readAPIKey = 'QK8RTANXM2N0KLRD';
+
+        // L'URL magique qui demande la toute dernière valeur (results=1) à ThingSpeak
+        const url = `https://api.thingspeak.com/channels/${channelID}/feeds.json?api_key=${readAPIKey}&results=1`;
+
+        // Fonction pour récupérer et afficher les données
+        function recupererDonnees() {
+            fetch(url)
+                .then(response => response.json()) // On convertit la réponse en format JSON
+                .then(data => {
+                    // On vérifie qu'il y a bien des données
+                    if (data.feeds && data.feeds.length > 0) {
+                        const derniereMesure = data.feeds[0]; // On prend la dernière mesure
+
+                        // On met à jour le texte sur la page HTML
+                        // field1 = temp, field2 = hum, field3 = press
+                        document.getElementById('val_temp').innerText = derniereMesure.field1 ? parseFloat(derniereMesure.field1).toFixed(1) : '--';
+                        document.getElementById('val_hum').innerText = derniereMesure.field2 ? parseFloat(derniereMesure.field2).toFixed(1) : '--';
+                        document.getElementById('val_press').innerText = derniereMesure.field3 ? parseFloat(derniereMesure.field3).toFixed(1) : '--';
+
+                        // On met à jour l'heure d'actualisation
+                        const dateMesure = new Date(derniereMesure.created_at);
+                        document.getElementById('derniere_maj').innerText = 'Dernière mise à jour : ' + dateMesure.toLocaleTimeString('fr-FR');
+                    }
+                })
+                .catch(error => console.error('Erreur de connexion à ThingSpeak :', error));
+        }
+
+        // 1. On lance la fonction une première fois tout de suite
+        recupererDonnees();
+
+        // 2. On demande au navigateur de relancer la fonction toutes les 15 secondes (15000 millisecondes)
+        setInterval(recupererDonnees, 15000);
+    </script>
+
+</body>
+</html>
