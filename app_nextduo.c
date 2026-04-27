@@ -20,6 +20,8 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include "app_netxduo.h"
+#include <stdio.h>
+#include <string.h>
 
 /* Private includes ----------------------------------------------------------*/
 #include "nxd_dhcp_client.h"
@@ -36,6 +38,10 @@
 #define PING_ADDRESS      IP_ADDRESS(8, 8, 8, 8)
 #define PING_DATA_SIZE    4
 #define MAX_PING_COUNT    4
+
+/* Définition du serveur ThingSpeak (api.thingspeak.com = 184.106.153.149) */
+#define THINGSPEAK_SERVER_ADDRESS IP_ADDRESS(184, 106, 153, 149)
+#define THINGSPEAK_SERVER_PORT    80
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -84,7 +90,9 @@ UINT MX_NetXDuo_Init(VOID *memory_ptr)
 
   /* USER CODE END MX_NetXDuo_MEM_POOL */
   /* USER CODE BEGIN 0 */
-  printf("Nx_TCP_Echo_Client application started..\r\n");
+  printf("\r\n========================================\r\n");
+  printf("<début d'application IoT ThingSpeak>\r\n");
+  printf("========================================\r\n");
   /* USER CODE END 0 */
 
   /* Initialize the NetXDuo system. */
@@ -271,19 +279,15 @@ UINT MX_NetXDuo_Init(VOID *memory_ptr)
 */
 static VOID ip_address_change_notify_callback(NX_IP *ip_instance, VOID *ptr)
 {
-  /* USER CODE BEGIN ip_address_change_notify_callback */
   /* release the semaphore as soon as an IP address is available */
   if (nx_ip_address_get(&NetXDuoEthIpInstance, &IpAddress, &NetMask) != NX_SUCCESS)
   {
-    /* USER CODE BEGIN IP address change callback error */
     Error_Handler();
-    /* USER CODE END IP address change callback error */
   }
   if(IpAddress != NULL_ADDRESS)
   {
     tx_semaphore_put(&DHCPSemaphore);
   }
-  /* USER CODE END ip_address_change_notify_callback */
 }
 
 /**
@@ -293,46 +297,29 @@ static VOID ip_address_change_notify_callback(NX_IP *ip_instance, VOID *ptr)
 */
 static VOID nx_app_thread_entry (ULONG thread_input)
 {
-  /* USER CODE BEGIN Nx_App_Thread_Entry 0 */
-
-  /* USER CODE END Nx_App_Thread_Entry 0 */
-
   UINT ret = NX_SUCCESS;
-
-  /* USER CODE BEGIN Nx_App_Thread_Entry 1 */
-
-  /* USER CODE END Nx_App_Thread_Entry 1 */
-
   NX_PARAMETER_NOT_USED(thread_input);
 
   /* register the IP address change callback */
   ret = nx_ip_address_change_notify(&NetXDuoEthIpInstance, ip_address_change_notify_callback, NULL);
   if (ret != NX_SUCCESS)
   {
-    /* USER CODE BEGIN IP address change callback error */
     Error_Handler();
-    /* USER CODE END IP address change callback error */
   }
 
   /* start the DHCP client */
   ret = nx_dhcp_start(&DHCPClient);
   if (ret != NX_SUCCESS)
   {
-    /* USER CODE BEGIN DHCP client start error */
     Error_Handler();
-    /* USER CODE END DHCP client start error */
   }
-  printf("Looking for DHCP server ..\r\n");
+  printf("Recherche sur le serveur DHCP ..\r\n");
 
   /* wait until an IP address is ready */
   if(tx_semaphore_get(&DHCPSemaphore, TX_WAIT_FOREVER) != TX_SUCCESS)
   {
-    /* USER CODE BEGIN DHCPSemaphore get error */
     Error_Handler();
-    /* USER CODE END DHCPSemaphore get error */
   }
-
-  /* USER CODE BEGIN Nx_App_Thread_Entry 2 */
 
   PRINT_IP_ADDRESS(IpAddress);
 
@@ -346,12 +333,11 @@ static VOID nx_app_thread_entry (ULONG thread_input)
   tx_thread_relinquish();
 
   return;
-  /* USER CODE END Nx_App_Thread_Entry 2 */
 }
 
 /* USER CODE BEGIN 1 */
 /**
-* @brief  TCP thread entry.
+* @brief  TCP thread entry - Modifié pour ThingSpeak
 * @param thread_input: thread user data
 * @retval none
 */
@@ -362,6 +348,7 @@ static VOID App_TCP_Thread_Entry(ULONG thread_input)
 
   ULONG bytes_read;
   UCHAR data_buffer[512];
+  char http_request[256];
 
   ULONG source_ip_address;
   UINT source_port;
@@ -371,110 +358,98 @@ static VOID App_TCP_Thread_Entry(ULONG thread_input)
 
   NX_PARAMETER_NOT_USED(thread_input);
 
-  /* create the TCP socket */
-  ret = nx_tcp_socket_create(&NetXDuoEthIpInstance, &TCPSocket, "TCP Server Socket", NX_IP_NORMAL, NX_FRAGMENT_OKAY,
-                             NX_IP_TIME_TO_LIVE, WINDOW_SIZE, NX_NULL, NX_NULL);
-  if (ret != NX_SUCCESS)
-  {
-    Error_Handler();
-  }
-
-  /* bind the client socket for the DEFAULT_PORT */
-  ret =  nx_tcp_client_socket_bind(&TCPSocket, DEFAULT_PORT, NX_WAIT_FOREVER);
-
-  if (ret != NX_SUCCESS)
-  {
-    Error_Handler();
-  }
-
-  /* connect to the remote server on the specified port */
-  ret = nx_tcp_client_socket_connect(&TCPSocket, TCP_SERVER_ADDRESS, TCP_SERVER_PORT, NX_WAIT_FOREVER);
-
-  if (ret != NX_SUCCESS)
-  {
-    Error_Handler();
-  }
-
   while(count++ < MAX_PACKET_COUNT)
   {
+    /* 1. Création de la socket avant chaque envoi (L'API ThingSpeak ferme la connexion après chaque requête) */
+    ret = nx_tcp_socket_create(&NetXDuoEthIpInstance, &TCPSocket, "TCP Client Socket", NX_IP_NORMAL, NX_FRAGMENT_OKAY,
+                               NX_IP_TIME_TO_LIVE, WINDOW_SIZE, NX_NULL, NX_NULL);
+    if (ret != NX_SUCCESS) break;
+
+    ret =  nx_tcp_client_socket_bind(&TCPSocket, NX_ANY_PORT, NX_WAIT_FOREVER);
+    if (ret != NX_SUCCESS) break;
+
+    printf("\r\n--- Requête %u/%u vers ThingSpeak ---\r\n", count, MAX_PACKET_COUNT);
+
+    /* 2. Connexion au serveur ThingSpeak */
+    ret = nx_tcp_client_socket_connect(&TCPSocket, THINGSPEAK_SERVER_ADDRESS, THINGSPEAK_SERVER_PORT, NX_WAIT_FOREVER);
+    if (ret != NX_SUCCESS)
+    {
+      printf("Erreur de connexion a ThingSpeak.\r\n");
+      nx_tcp_client_socket_unbind(&TCPSocket);
+      nx_tcp_socket_delete(&TCPSocket);
+      continue;
+    }
+
+    /* Log de simulation de lecture des capteurs */
+    printf("<LectureInterface Capteurs>\r\n");
+
+    /* Valeurs simulées (on fait varier légèrement la température pour voir la courbe sur ThingSpeak) */
+    float temp = 25.5f + ((float)count * 0.2f);
+    float hum = 60.0f;
+    float press = 1013.2f;
+
+    /* 3. Construction de la requête HTTP GET */
+    /* RAPPEL : Remplace "VOTRE_CLEF_API_WRITE" par ta vraie clef ThingSpeak */
+    snprintf(http_request, sizeof(http_request),
+             "GET /update?api_key=5PH31ZBO1VEMGZFL&field1=%.1f&field2=%.1f&field3=%.1f HTTP/1.1\r\n"
+             "Host: api.thingspeak.com\r\n"
+             "Connection: close\r\n\r\n",temp, hum, press);
+
     TX_MEMSET(data_buffer, '\0', sizeof(data_buffer));
 
     /* allocate the packet to send over the TCP socket */
     ret = nx_packet_allocate(&NxAppPool, &data_packet, NX_TCP_PACKET, TX_WAIT_FOREVER);
+    if (ret != NX_SUCCESS) break;
 
-    if (ret != NX_SUCCESS)
-    {
-      break;
-    }
-
-    /* append the message to send into the packet */
-    ret = nx_packet_data_append(data_packet, (VOID *)DEFAULT_MESSAGE, sizeof(DEFAULT_MESSAGE), &NxAppPool, TX_WAIT_FOREVER);
-
+    /* append the HTTP message to send into the packet */
+    ret = nx_packet_data_append(data_packet, (VOID *)http_request, strlen(http_request), &NxAppPool, TX_WAIT_FOREVER);
     if (ret != NX_SUCCESS)
     {
       nx_packet_release(data_packet);
-      data_packet = NX_NULL;
       break;
     }
+
+    /* Log indiquant que la communication réseau commence */
+    printf("<Communication Réseau - Envoi de la trame HTTP>\r\n");
 
     /* send the packet over the TCP socket */
     ret = nx_tcp_socket_send(&TCPSocket, data_packet, DEFAULT_TIMEOUT);
     data_packet = NX_NULL;
 
-    if (ret != NX_SUCCESS)
-    {
-      break;
-    }
-
-    /* wait for the server response */
+    /* wait for the server response (ThingSpeak doit répondre un "200 OK") */
     ret = nx_tcp_socket_receive(&TCPSocket, &server_packet, DEFAULT_TIMEOUT);
 
     if (ret == NX_SUCCESS)
     {
-      /* get the server IP address and port */
       nx_udp_source_extract(server_packet, &source_ip_address, &source_port);
-
-      /* retrieve the data sent by the server */
       nx_packet_data_retrieve(server_packet, data_buffer, &bytes_read);
 
-      /* print the received data */
-      PRINT_DATA(source_ip_address, source_port, data_buffer);
+      printf("Reponse de ThingSpeak reçue (%lu bytes)\r\n", bytes_read);
 
-      /* release the server packet */
       nx_packet_release(server_packet);
       server_packet = NX_NULL;
     }
     else
     {
-      /* no message received exit the loop */
-      break;
+      printf("Aucune reponse ou timeout.\r\n");
+    }
+
+    /* Déconnexion propre de la socket après l'envoi */
+    nx_tcp_socket_disconnect(&TCPSocket, DEFAULT_TIMEOUT);
+    nx_tcp_client_socket_unbind(&TCPSocket);
+    nx_tcp_socket_delete(&TCPSocket);
+
+    /* 4. TEMPO OBLIGATOIRE POUR THINGSPEAK (15 Secondes) */
+    if (count < MAX_PACKET_COUNT) {
+        printf("Attente de 15 secondes (Limitation ThingSpeak)...\r\n");
+        tx_thread_sleep(NX_IP_PERIODIC_RATE * 15);
     }
   }
-
-  /* release allocated packets if still pending */
-  if (server_packet != NX_NULL)
-  {
-    nx_packet_release(server_packet);
-  }
-
-  if (data_packet != NX_NULL)
-  {
-    nx_packet_release(data_packet);
-  }
-
-  /* disconnect the socket */
-  nx_tcp_socket_disconnect(&TCPSocket, DEFAULT_TIMEOUT);
-
-  /* unbind the socket */
-  nx_tcp_client_socket_unbind(&TCPSocket);
-
-  /* delete the socket */
-  nx_tcp_socket_delete(&TCPSocket);
 
   /* print test summary on the UART */
   if (count == MAX_PACKET_COUNT + 1)
   {
-    printf("\r\n-------------------------------------\r\n\tSUCCESS : %u / %u packets sent\r\n-------------------------------------\r\n", count - 1, MAX_PACKET_COUNT);
+    printf("\r\n-------------------------------------\r\n\tSUCCESS : %u / %u packets sent to Cloud\r\n-------------------------------------\r\n", count - 1, MAX_PACKET_COUNT);
     Success_Handler();
   }
   else
@@ -494,7 +469,7 @@ static VOID App_Ping_Thread_Entry(ULONG thread_input)
   UINT ret;
   UINT ping_count = 0;
   NX_PACKET *ping_response = NX_NULL;
-  UCHAR ping_data[PING_DATA_SIZE] = { 'P', 'I', 'N', 'G' };
+  CHAR ping_data[PING_DATA_SIZE] = { 'P', 'I', 'N', 'G' };
 
   NX_PARAMETER_NOT_USED(thread_input);
 
@@ -513,7 +488,7 @@ static VOID App_Ping_Thread_Entry(ULONG thread_input)
       {
         printf("Ping 8.8.8.8 OK\r\n");
 
-        /* Clignotement pendant 3 secondes puis LED OFF */
+        /* Clignotement de la LED VERTE pendant 3 secondes puis OFF */
         for (UINT i = 0; i < 6; i++)
         {
           HAL_GPIO_TogglePin(LED_GREEN_GPIO_Port, LED_GREEN_Pin);
@@ -544,7 +519,6 @@ static VOID App_Ping_Thread_Entry(ULONG thread_input)
     tx_thread_sleep(NX_IP_PERIODIC_RATE);
   }
 
-  /* Fin des 4 ping : LED éteinte */
   HAL_GPIO_WritePin(LED_GREEN_GPIO_Port, LED_GREEN_Pin, GPIO_PIN_RESET);
   printf("Ping test finished after %u attempts\r\n", MAX_PING_COUNT);
 
@@ -575,40 +549,28 @@ static VOID App_Link_Thread_Entry(ULONG thread_input)
       {
         linkdown = 0;
 
-        /* The network cable is connected. */
-        printf("The network cable is connected.\r\n");
+        printf("Le câble réseau est connecté.\r\n");
 
-        /* Send request to enable PHY Link. */
         nx_ip_driver_direct_command(&NetXDuoEthIpInstance, NX_LINK_ENABLE,
                                     &actual_status);
 
-        /* Send request to check if an address is resolved. */
         status = nx_ip_interface_status_check(&NetXDuoEthIpInstance, 0, NX_IP_ADDRESS_RESOLVED,
                                               &actual_status, 10);
         if(status == NX_SUCCESS)
         {
-          /* Stop DHCP */
           nx_dhcp_stop(&DHCPClient);
-
-          /* Reinitialize DHCP */
           nx_dhcp_reinitialize(&DHCPClient);
-
-          /* Start DHCP */
           nx_dhcp_start(&DHCPClient);
 
-          /* wait until an IP address is ready */
           if(tx_semaphore_get(&DHCPSemaphore, TX_WAIT_FOREVER) != TX_SUCCESS)
           {
-            /* USER CODE BEGIN DHCPSemaphore get error */
             Error_Handler();
-            /* USER CODE END DHCPSemaphore get error */
           }
 
           PRINT_IP_ADDRESS(IpAddress);
         }
         else
         {
-          /* Set the DHCP Client's remaining lease time to 0 seconds to trigger an immediate renewal request for a DHCP address. */
           nx_dhcp_client_update_time_remaining(&DHCPClient, 0);
         }
       }
@@ -618,7 +580,6 @@ static VOID App_Link_Thread_Entry(ULONG thread_input)
       if(0 == linkdown)
       {
         linkdown = 1;
-        /* The network cable is not connected. */
         printf("The network cable is not connected.\r\n");
         nx_ip_driver_direct_command(&NetXDuoEthIpInstance, NX_LINK_DISABLE,
                                     &actual_status);
